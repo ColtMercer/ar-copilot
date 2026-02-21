@@ -1,38 +1,32 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const db = getDb();
+  const db = await getDb();
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const client_id = url.searchParams.get("client_id");
 
   const where: string[] = [];
   const params: any[] = [];
+  let i = 1;
 
-  if (status) {
-    where.push("status = ?");
-    params.push(status);
-  }
-  if (client_id) {
-    where.push("client_id = ?");
-    params.push(client_id);
-  }
+  if (status) { where.push(`status = $${i++}`); params.push(status); }
+  if (client_id) { where.push(`client_id = $${i++}`); params.push(client_id); }
 
   const sql = `
-    select id, client_id, invoice_number, description, currency, amount_cents,
+    SELECT id, client_id, invoice_number, description, currency, amount_cents,
            issue_date, due_date, paid_date, status,
            last_followup_at, last_followup_stage,
            created_at, updated_at
-    from invoices
-    ${where.length ? `where ${where.join(" and ")}` : ""}
-    order by due_date asc
+    FROM invoices
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY due_date ASC
   `;
 
-  const rows = db.prepare(sql).all(...params);
+  const { rows } = await db.query(sql, params);
   return NextResponse.json({ ok: true, invoices: rows });
 }
 
@@ -52,36 +46,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "due_date required" }, { status: 400 });
   }
 
-  const db = getDb();
-  const id = crypto.randomUUID();
-
-  db.prepare(
-    `insert into invoices (
-        id, client_id, invoice_number, description, currency, amount_cents,
-        issue_date, due_date
-     ) values (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    body.client_id || null,
-    body.invoice_number || null,
-    body.description || null,
-    body.currency || "USD",
-    Number.isFinite(body.amount_cents) ? Math.trunc(body.amount_cents as number) : 0,
-    body.issue_date || null,
-    due_date
+  const db = await getDb();
+  const { rows } = await db.query(
+    `INSERT INTO invoices (client_id, invoice_number, description, currency, amount_cents, issue_date, due_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      body.client_id || null,
+      body.invoice_number || null,
+      body.description || null,
+      body.currency || "USD",
+      Number.isFinite(body.amount_cents) ? Math.trunc(body.amount_cents as number) : 0,
+      body.issue_date || null,
+      due_date,
+    ]
   );
 
-  const invoice = db
-    .prepare(
-      `select id, client_id, invoice_number, description, currency, amount_cents,
-              issue_date, due_date, paid_date, status,
-              last_followup_at, last_followup_stage,
-              created_at, updated_at
-       from invoices where id = ?`
-    )
-    .get(id);
-
-  return NextResponse.json({ ok: true, invoice }, { status: 201 });
+  return NextResponse.json({ ok: true, invoice: rows[0] }, { status: 201 });
 }
 
 export async function PATCH(req: Request) {
@@ -98,28 +79,28 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   }
 
-  const db = getDb();
   const sets: string[] = [];
   const params: any[] = [];
+  let i = 1;
 
-  if (body.status) { sets.push("status = ?"); params.push(body.status); }
-  if (body.paid_date) { sets.push("paid_date = ?"); params.push(body.paid_date); }
-  if (body.due_date) { sets.push("due_date = ?"); params.push(body.due_date); }
-  if (body.last_followup_at) { sets.push("last_followup_at = ?"); params.push(body.last_followup_at); }
-  if (body.last_followup_stage) { sets.push("last_followup_stage = ?"); params.push(body.last_followup_stage); }
+  if (body.status) { sets.push(`status = $${i++}`); params.push(body.status); }
+  if (body.paid_date) { sets.push(`paid_date = $${i++}`); params.push(body.paid_date); }
+  if (body.due_date) { sets.push(`due_date = $${i++}`); params.push(body.due_date); }
+  if (body.last_followup_at) { sets.push(`last_followup_at = $${i++}`); params.push(body.last_followup_at); }
+  if (body.last_followup_stage) { sets.push(`last_followup_stage = $${i++}`); params.push(body.last_followup_stage); }
 
   if (sets.length === 0) {
     return NextResponse.json({ ok: false, error: "nothing to update" }, { status: 400 });
   }
 
-  sets.push("updated_at = datetime('now')");
+  sets.push(`updated_at = now()`);
   params.push(body.id);
 
-  db.prepare(`update invoices set ${sets.join(", ")} where id = ?`).run(...params);
+  const db = await getDb();
+  const { rows } = await db.query(
+    `UPDATE invoices SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+    params
+  );
 
-  const invoice = db.prepare(
-    `select * from invoices where id = ?`
-  ).get(body.id);
-
-  return NextResponse.json({ ok: true, invoice });
+  return NextResponse.json({ ok: true, invoice: rows[0] });
 }

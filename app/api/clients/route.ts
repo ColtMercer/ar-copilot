@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `select id, name, primary_contact_name, primary_contact_email, company_domain, notes, created_at, updated_at
-       from clients
-       order by created_at desc`
-    )
-    .all();
+  const db = await getDb();
+  const { rows } = await db.query(
+    `SELECT id, name, primary_contact_name, primary_contact_email, company_domain, notes, created_at, updated_at
+     FROM clients ORDER BY created_at DESC`
+  );
   return NextResponse.json({ ok: true, clients: rows });
 }
 
@@ -30,27 +26,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "name required" }, { status: 400 });
   }
 
-  const db = getDb();
-  const id = crypto.randomUUID();
-
-  db.prepare(
-    `insert into clients (id, name, primary_contact_name, primary_contact_email, company_domain, notes)
-     values (?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    name,
-    body.primary_contact_name || null,
-    body.primary_contact_email || null,
-    body.company_domain || null,
-    body.notes || null
+  const db = await getDb();
+  const { rows } = await db.query(
+    `INSERT INTO clients (name, primary_contact_name, primary_contact_email, company_domain, notes)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [name, body.primary_contact_name || null, body.primary_contact_email || null, body.company_domain || null, body.notes || null]
   );
 
-  const client = db
-    .prepare(
-      `select id, name, primary_contact_name, primary_contact_email, company_domain, notes, created_at, updated_at
-       from clients where id = ?`
-    )
-    .get(id);
-
-  return NextResponse.json({ ok: true, client }, { status: 201 });
+  return NextResponse.json({ ok: true, client: rows[0] }, { status: 201 });
 }

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -34,25 +33,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Valid email is required" }, { status: 400 });
   }
 
-  const db = getDb();
-  const id = crypto.randomUUID();
+  const db = await getDb();
 
   try {
-    db.prepare(
-      `insert into waitlist_signups (id, email, name, invoice_volume, current_tool, pain, source)
-       values (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      email,
-      payload.name?.trim() || null,
-      payload.invoice_volume || null,
-      payload.current_tool || null,
-      payload.pain || null,
-      payload.source || "landing_v1"
+    await db.query(
+      `INSERT INTO waitlist_signups (email, name, invoice_volume, current_tool, pain, source)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [email, payload.name?.trim() || null, payload.invoice_volume || null, payload.current_tool || null, payload.pain || null, payload.source || "landing_v1"]
     );
   } catch (err: any) {
-    if (err?.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      // Already signed up — still redirect to thanks
+    if (err?.code === "23505") {
+      // unique violation — already signed up
       if (!contentType.includes("application/json")) {
         return NextResponse.redirect(new URL("/thanks", req.url), { status: 303 });
       }
@@ -65,11 +56,11 @@ export async function POST(req: Request) {
     return NextResponse.redirect(new URL("/thanks", req.url), { status: 303 });
   }
 
-  return NextResponse.json({ ok: true, id });
+  return NextResponse.json({ ok: true });
 }
 
 export async function GET() {
-  const db = getDb();
-  const count = db.prepare("select count(*) as n from waitlist_signups").get() as { n: number };
-  return NextResponse.json({ ok: true, count: count.n });
+  const db = await getDb();
+  const { rows } = await db.query("SELECT count(*) AS n FROM waitlist_signups");
+  return NextResponse.json({ ok: true, count: parseInt(rows[0].n) });
 }
