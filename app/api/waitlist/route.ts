@@ -52,7 +52,6 @@ export async function POST(req: Request) {
     );
   } catch (err: any) {
     if (err?.code === "23505") {
-      // unique violation — already signed up
       if (!contentType.includes("application/json")) {
         return NextResponse.redirect(new URL("/thanks", base), { status: 303 });
       }
@@ -75,7 +74,7 @@ export async function GET(req: Request) {
 
   if (detail === "1") {
     const { rows } = await db.query(
-      "SELECT name, email, invoice_volume, current_tool, pain, source, created_at FROM waitlist_signups ORDER BY created_at DESC"
+      "SELECT id, name, email, invoice_volume, current_tool, pain, source, created_at FROM waitlist_signups ORDER BY created_at DESC"
     );
     return NextResponse.json({ ok: true, count: rows.length, signups: rows });
   }
