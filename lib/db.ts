@@ -45,6 +45,9 @@ async function initSchema() {
 
   // Now run migrations on the actual DB
   await pool.query(`
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+
     CREATE TABLE IF NOT EXISTS waitlist_signups (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       email TEXT NOT NULL UNIQUE,
