@@ -68,8 +68,18 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const db = await getDb();
+  const url = new URL(req.url);
+  const detail = url.searchParams.get("detail");
+
+  if (detail === "1") {
+    const { rows } = await db.query(
+      "SELECT name, email, invoice_volume, current_tool, pain, source, created_at FROM waitlist_signups ORDER BY created_at DESC"
+    );
+    return NextResponse.json({ ok: true, count: rows.length, signups: rows });
+  }
+
   const { rows } = await db.query("SELECT count(*) AS n FROM waitlist_signups");
   return NextResponse.json({ ok: true, count: parseInt(rows[0].n) });
 }
