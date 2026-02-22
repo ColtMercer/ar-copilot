@@ -7,8 +7,17 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function getBaseUrl(req: Request): string {
+  const fwdHost = req.headers.get("x-forwarded-host");
+  const fwdProto = req.headers.get("x-forwarded-proto") || "https";
+  if (fwdHost) return `${fwdProto}://${fwdHost}`;
+  const url = new URL(req.url);
+  return url.origin;
+}
+
 export async function POST(req: Request) {
   const contentType = req.headers.get("content-type") || "";
+  const base = getBaseUrl(req);
 
   let payload: Record<string, string> = {};
 
@@ -28,7 +37,7 @@ export async function POST(req: Request) {
   const email = (payload.email || "").trim().toLowerCase();
   if (!email || !isValidEmail(email)) {
     if (!contentType.includes("application/json")) {
-      return NextResponse.redirect(new URL("/#waitlist", req.url), { status: 303 });
+      return NextResponse.redirect(new URL("/#waitlist", base), { status: 303 });
     }
     return NextResponse.json({ ok: false, error: "Valid email is required" }, { status: 400 });
   }
@@ -45,7 +54,7 @@ export async function POST(req: Request) {
     if (err?.code === "23505") {
       // unique violation — already signed up
       if (!contentType.includes("application/json")) {
-        return NextResponse.redirect(new URL("/thanks", req.url), { status: 303 });
+        return NextResponse.redirect(new URL("/thanks", base), { status: 303 });
       }
       return NextResponse.json({ ok: true, message: "Already signed up" });
     }
@@ -53,7 +62,7 @@ export async function POST(req: Request) {
   }
 
   if (!contentType.includes("application/json")) {
-    return NextResponse.redirect(new URL("/thanks", req.url), { status: 303 });
+    return NextResponse.redirect(new URL("/thanks", base), { status: 303 });
   }
 
   return NextResponse.json({ ok: true });
