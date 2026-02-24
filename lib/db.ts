@@ -76,12 +76,15 @@ async function initSchema() {
       include_payment_methods BOOLEAN NOT NULL DEFAULT true,
       include_late_fee BOOLEAN NOT NULL DEFAULT false,
       late_fee_text TEXT,
+      payment_link TEXT,
       signature_name TEXT,
       signature_company TEXT,
       signature_phone TEXT,
       signature_email TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE client_settings ADD COLUMN IF NOT EXISTS payment_link TEXT;
 
     CREATE TABLE IF NOT EXISTS invoices (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

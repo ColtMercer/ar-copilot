@@ -26,6 +26,20 @@ type Client = {
   primary_contact_email: string | null;
 };
 
+type ClientSettings = {
+  client_id: string;
+  tone: "friendly" | "neutral" | "firm";
+  include_payment_methods: boolean;
+  include_late_fee: boolean;
+  late_fee_text: string | null;
+  payment_link: string | null;
+  signature_name: string | null;
+  signature_company: string | null;
+  signature_phone: string | null;
+  signature_email: string | null;
+  updated_at: string | null;
+};
+
 type ChaseItem = {
   invoice_id: string;
   client_id: string | null;
@@ -41,6 +55,13 @@ type ChaseItem = {
   last_followup_stage: string | null;
   recommended_stage: "pre_due" | "day_1" | "day_7" | "day_14" | "final";
   client_tone: "friendly" | "neutral" | "firm" | string;
+  payment_link?: string | null;
+  signature_name?: string | null;
+  signature_company?: string | null;
+  signature_phone?: string | null;
+  signature_email?: string | null;
+  include_late_fee?: boolean;
+  late_fee_text?: string | null;
 };
 
 type Template = {
@@ -130,6 +151,8 @@ export default function Dashboard() {
   const [chaseList, setChaseList] = useState<ChaseItem[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
+  const [showAddClient, setShowAddClient] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Invoice detail modal state
@@ -140,6 +163,10 @@ export default function Dashboard() {
   const [draftTone, setDraftTone] = useState<string>("friendly");
   const [draftSubject, setDraftSubject] = useState<string>("");
   const [draftBody, setDraftBody] = useState<string>("");
+
+  const [activeClientSettings, setActiveClientSettings] = useState<ClientSettings | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const [invRes, cliRes, chaseRes] = await Promise.all([
@@ -198,20 +225,21 @@ export default function Dashboard() {
       "invoice.due_date": item.due_date,
       "invoice.days_overdue": String(item.days_overdue),
       "invoice.due_date_plus_3": addDays(item.due_date, 3),
-      // Settings not implemented yet; leave blank for now.
-      "payment.link": "",
-      "signature.name": "",
-      "signature.company": "",
-      "signature.phone": "",
-      "signature.email": "",
+      "payment.link": (item.payment_link || "").trim(),
+      "signature.name": (item.signature_name || "").trim(),
+      "signature.company": (item.signature_company || "").trim(),
+      "signature.phone": (item.signature_phone || "").trim(),
+      "signature.email": (item.signature_email || "").trim(),
     };
   }, []);
 
   const varsForInvoice = useCallback(
     (inv: Invoice) => {
       const client = inv.client_id ? clients[inv.client_id] : null;
-      const contactName = (client?.primary_contact_name || "").trim() || (client?.name || "").trim() || "there";
+      const contactName =
+        (client?.primary_contact_name || "").trim() || (client?.name || "").trim() || "there";
       const days = daysOverdue(inv.due_date);
+      const s = activeClientSettings;
 
       return {
         "client.name": (client?.name || "").trim(),
@@ -221,15 +249,14 @@ export default function Dashboard() {
         "invoice.due_date": inv.due_date,
         "invoice.days_overdue": String(days),
         "invoice.due_date_plus_3": addDays(inv.due_date, 3),
-        // Settings not implemented yet; leave blank for now.
-        "payment.link": "",
-        "signature.name": "",
-        "signature.company": "",
-        "signature.phone": "",
-        "signature.email": "",
+        "payment.link": (s?.payment_link || "").trim(),
+        "signature.name": (s?.signature_name || "").trim(),
+        "signature.company": (s?.signature_company || "").trim(),
+        "signature.phone": (s?.signature_phone || "").trim(),
+        "signature.email": (s?.signature_email || "").trim(),
       };
     },
-    [clients]
+    [activeClientSettings, clients]
   );
 
   const copyEmail = useCallback(
@@ -286,6 +313,9 @@ export default function Dashboard() {
   const openInvoiceDetails = useCallback(
     async (inv: Invoice) => {
       setActiveInvoice(inv);
+      setActiveClientSettings(null);
+      setSettingsSavedAt(null);
+
       const days = daysOverdue(inv.due_date);
       setDraftStage(stageFromDays(days));
       setDraftTone("friendly");
@@ -293,11 +323,25 @@ export default function Dashboard() {
       setDraftBody("");
       setActiveFollowups([]);
 
+      // Load followup timeline
       try {
         const res = await fetch(`/api/followups?invoice_id=${encodeURIComponent(inv.id)}`).then((r) => r.json());
         setActiveFollowups(res.followups || []);
       } catch {
         // leave empty
+      }
+
+      // Load client settings (default tone + signature/payment link)
+      if (inv.client_id) {
+        try {
+          const res = await fetch(`/api/client-settings?client_id=${encodeURIComponent(inv.client_id)}`).then((r) => r.json());
+          if (res?.settings) {
+            setActiveClientSettings(res.settings);
+            if (res.settings.tone) setDraftTone(res.settings.tone);
+          }
+        } catch {
+          // leave empty
+        }
       }
     },
     []
@@ -306,9 +350,52 @@ export default function Dashboard() {
   const closeInvoiceDetails = useCallback(() => {
     setActiveInvoice(null);
     setActiveFollowups([]);
+    setActiveClientSettings(null);
+    setSettingsBusy(false);
+    setSettingsSavedAt(null);
     setDraftSubject("");
     setDraftBody("");
   }, []);
+
+  const patchActiveClientSettings = useCallback((patch: Partial<ClientSettings>) => {
+    setActiveClientSettings((s) => (s ? { ...s, ...patch } : s));
+  }, []);
+
+  const saveActiveClientSettings = useCallback(async () => {
+    if (!activeClientSettings) return;
+
+    setSettingsBusy(true);
+    try {
+      const payload = {
+        client_id: activeClientSettings.client_id,
+        tone: activeClientSettings.tone,
+        include_payment_methods: activeClientSettings.include_payment_methods,
+        include_late_fee: activeClientSettings.include_late_fee,
+        late_fee_text: activeClientSettings.late_fee_text,
+        payment_link: activeClientSettings.payment_link,
+        signature_name: activeClientSettings.signature_name,
+        signature_company: activeClientSettings.signature_company,
+        signature_phone: activeClientSettings.signature_phone,
+        signature_email: activeClientSettings.signature_email,
+      };
+
+      const res = await fetch("/api/client-settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((r) => r.json());
+
+      if (!res?.ok) {
+        alert(res?.error || "Failed to save client settings");
+        return;
+      }
+
+      if (res?.settings) setActiveClientSettings(res.settings);
+      setSettingsSavedAt(Date.now());
+    } finally {
+      setSettingsBusy(false);
+    }
+  }, [activeClientSettings]);
 
   const loadDraftFromTemplate = useCallback(async () => {
     if (!activeInvoice) return;
@@ -378,9 +465,15 @@ export default function Dashboard() {
               Today&apos;s chase list & invoice tracker
             </p>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setShowAdd(!showAdd)} style={btnStyle}>
-              {showAdd ? "Cancel" : "+ Add Invoice"}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => { setShowAdd(!showAdd); setShowAddClient(false); setShowCsvImport(false); }} style={btnStyle}>
+              {showAdd ? "Cancel" : "+ Invoice"}
+            </button>
+            <button onClick={() => { setShowAddClient(!showAddClient); setShowAdd(false); setShowCsvImport(false); }} style={btnStyle}>
+              {showAddClient ? "Cancel" : "+ Client"}
+            </button>
+            <button onClick={() => { setShowCsvImport(!showCsvImport); setShowAdd(false); setShowAddClient(false); }} style={btnStyle}>
+              {showCsvImport ? "Cancel" : "CSV Import"}
             </button>
             <a href="/" style={{ ...btnStyle, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
               ← Home
@@ -506,6 +599,25 @@ export default function Dashboard() {
             clients={clients}
             onDone={() => {
               setShowAdd(false);
+              load();
+            }}
+          />
+        )}
+
+        {showAddClient && (
+          <AddClientForm
+            onDone={() => {
+              setShowAddClient(false);
+              load();
+            }}
+          />
+        )}
+
+        {showCsvImport && (
+          <CsvImportForm
+            clients={clients}
+            onDone={() => {
+              setShowCsvImport(false);
               load();
             }}
           />
@@ -637,6 +749,11 @@ export default function Dashboard() {
         <InvoiceDetailModal
           invoice={activeInvoice}
           client={activeInvoice.client_id ? clients[activeInvoice.client_id] : null}
+          clientSettings={activeClientSettings}
+          settingsBusy={settingsBusy}
+          settingsSavedAt={settingsSavedAt}
+          onChangeClientSettings={patchActiveClientSettings}
+          onSaveClientSettings={saveActiveClientSettings}
           followups={activeFollowups}
           draftStage={draftStage}
           draftTone={draftTone}
@@ -773,6 +890,11 @@ function AddInvoiceForm({ clients, onDone }: { clients: Record<string, Client>; 
 function InvoiceDetailModal(props: {
   invoice: Invoice;
   client: Client | null;
+  clientSettings: ClientSettings | null;
+  settingsBusy: boolean;
+  settingsSavedAt: number | null;
+  onChangeClientSettings: (patch: Partial<ClientSettings>) => void;
+  onSaveClientSettings: () => Promise<void>;
   followups: FollowupEvent[];
   draftStage: ChaseItem["recommended_stage"];
   draftTone: string;
@@ -840,7 +962,7 @@ function InvoiceDetailModal(props: {
                 <div style={labelStyle}>Stage</div>
                 <select
                   value={props.draftStage}
-                  onChange={(e) => props.onChangeStage(e.target.value as any)}
+                  onChange={(e) => props.onChangeStage(e.target.value as ChaseItem["recommended_stage"])}
                   style={inputStyle}
                   disabled={props.busy}
                 >
@@ -859,6 +981,82 @@ function InvoiceDetailModal(props: {
                   <option value="firm">firm</option>
                 </select>
               </div>
+            {props.clientSettings && (
+              <div style={{ gridColumn: "1 / -1", borderTop: "1px solid rgba(255,255,255,.08)", paddingTop: 10, marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>Client defaults</div>
+                  {props.settingsSavedAt && (
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,.45)" }}>
+                      Saved {new Date(props.settingsSavedAt).toLocaleTimeString()}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
+                  <div>
+                    <div style={labelStyle}>Default tone</div>
+                    <select
+                      value={props.clientSettings.tone}
+                      onChange={(e) => {
+                        const tone = e.target.value as ClientSettings["tone"];
+                        props.onChangeClientSettings({ tone });
+                        props.onChangeTone(tone);
+                      }}
+                      style={inputStyle}
+                      disabled={props.settingsBusy}
+                    >
+                      <option value="friendly">friendly</option>
+                      <option value="neutral">neutral</option>
+                      <option value="firm">firm</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div style={labelStyle}>Payment link</div>
+                    <input
+                      value={props.clientSettings.payment_link || ""}
+                      onChange={(e) => props.onChangeClientSettings({ payment_link: e.target.value })}
+                      style={inputStyle}
+                      disabled={props.settingsBusy}
+                      placeholder="https://..."
+                    />
+                  </div>
+
+                  <div>
+                    <div style={labelStyle}>Signature name</div>
+                    <input
+                      value={props.clientSettings.signature_name || ""}
+                      onChange={(e) => props.onChangeClientSettings({ signature_name: e.target.value })}
+                      style={inputStyle}
+                      disabled={props.settingsBusy}
+                      placeholder="Colt"
+                    />
+                  </div>
+
+                  <div>
+                    <div style={labelStyle}>Signature email</div>
+                    <input
+                      value={props.clientSettings.signature_email || ""}
+                      onChange={(e) => props.onChangeClientSettings({ signature_email: e.target.value })}
+                      style={inputStyle}
+                      disabled={props.settingsBusy}
+                      placeholder="colt@..."
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                  <button
+                    onClick={props.onSaveClientSettings}
+                    disabled={props.settingsBusy || props.busy}
+                    style={{ ...smallBtn, background: "rgba(255,255,255,.10)", color: "rgba(255,255,255,.92)" }}
+                  >
+                    {props.settingsBusy ? "Saving…" : "Save defaults"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             </div>
 
             <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -959,11 +1157,228 @@ function InvoiceDetailModal(props: {
             )}
 
             <div style={{ marginTop: 10, fontSize: 12, color: "rgba(255,255,255,.45)" }}>
-              Note: signature/payment-link settings are not wired yet, so template variables may render blank.
+              {props.clientSettings
+                ? "Templates in this modal use your saved signature + payment link (Client defaults)."
+                : "Tip: add client defaults (signature/payment link) to avoid blank template variables."}
             </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AddClientForm({ onDone }: { onDone: () => void }) {
+  const [form, setForm] = useState({ name: "", contact_name: "", contact_email: "", company_domain: "", notes: "" });
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    setBusy(true);
+    try {
+      await fetch("/api/clients", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          primary_contact_name: form.contact_name.trim() || undefined,
+          primary_contact_email: form.contact_email.trim() || undefined,
+          company_domain: form.company_domain.trim() || undefined,
+          notes: form.notes.trim() || undefined,
+        }),
+      });
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} style={{
+      border: "1px solid rgba(24,214,255,.3)", borderRadius: 16, padding: 20,
+      background: "rgba(24,214,255,.06)", marginBottom: 20,
+      display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12,
+    }}>
+      <div>
+        <label style={labelStyle}>Company / Client Name *</label>
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} placeholder="Acme Corp" required />
+      </div>
+      <div>
+        <label style={labelStyle}>Contact Name</label>
+        <input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} style={inputStyle} placeholder="Jane Smith" />
+      </div>
+      <div>
+        <label style={labelStyle}>Contact Email</label>
+        <input type="email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} style={inputStyle} placeholder="jane@acme.com" />
+      </div>
+      <div>
+        <label style={labelStyle}>Domain</label>
+        <input value={form.company_domain} onChange={(e) => setForm({ ...form, company_domain: e.target.value })} style={inputStyle} placeholder="acme.com" />
+      </div>
+      <div>
+        <label style={labelStyle}>Notes</label>
+        <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} style={inputStyle} placeholder="Net 30, AP contact is..." />
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end" }}>
+        <button type="submit" disabled={busy} style={{ ...btnStyle, background: "linear-gradient(135deg, rgba(24,214,255,.85), rgba(124,92,255,.72))" }}>
+          {busy ? "Adding..." : "Add Client"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CsvImportForm({ clients, onDone }: { clients: Record<string, Client>; onDone: () => void }) {
+  const [csvText, setCsvText] = useState("");
+  const [preview, setPreview] = useState<Array<Record<string, string>>>([]);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const parseCsv = (text: string) => {
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+    return lines.slice(1).map(line => {
+      const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+      const row: Record<string, string> = {};
+      headers.forEach((h, i) => { row[h] = vals[i] || ""; });
+      return row;
+    }).filter(r => r.due_date || r.amount || r.client);
+  };
+
+  const handleParse = () => {
+    const rows = parseCsv(csvText);
+    setPreview(rows);
+    setResult(null);
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      setCsvText(text);
+      setPreview(parseCsv(text));
+      setResult(null);
+    };
+    reader.readAsText(file);
+  };
+
+  const doImport = async () => {
+    setImporting(true);
+    let created = 0;
+    let errors = 0;
+
+    // Build client name → id map
+    const clientMap: Record<string, string> = {};
+    for (const c of Object.values(clients)) {
+      clientMap[c.name.toLowerCase()] = c.id;
+    }
+
+    for (const row of preview) {
+      try {
+        // Try to match client by name
+        const clientName = (row.client || row.client_name || row.company || "").trim();
+        let clientId = clientName ? clientMap[clientName.toLowerCase()] : undefined;
+
+        // Auto-create client if not found
+        if (clientName && !clientId) {
+          const res = await fetch("/api/clients", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: clientName, primary_contact_email: row.email || row.contact_email || undefined }),
+          }).then(r => r.json());
+          if (res.ok && res.client) {
+            clientId = res.client.id as string;
+            clientMap[clientName.toLowerCase()] = clientId as string;
+          }
+        }
+
+        const amountStr = (row.amount || row.amount_cents || "0").replace(/[$,]/g, "");
+        const amountCents = row.amount_cents ? parseInt(amountStr) : Math.round(parseFloat(amountStr) * 100);
+
+        await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            client_id: clientId || undefined,
+            invoice_number: row.invoice_number || row.invoice || row.number || undefined,
+            description: row.description || row.desc || undefined,
+            amount_cents: amountCents || 0,
+            due_date: row.due_date || row.due || new Date().toISOString().slice(0, 10),
+            issue_date: row.issue_date || row.issued || undefined,
+          }),
+        });
+        created++;
+      } catch {
+        errors++;
+      }
+    }
+
+    setResult(`Imported ${created} invoices${errors ? `, ${errors} errors` : ""}.`);
+    setImporting(false);
+    if (created > 0) setTimeout(() => onDone(), 1500);
+  };
+
+  return (
+    <div style={{
+      border: "1px solid rgba(48,209,88,.3)", borderRadius: 16, padding: 20,
+      background: "rgba(48,209,88,.06)", marginBottom: 20,
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 10 }}>CSV Invoice Import</div>
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,.55)", marginBottom: 12 }}>
+        Expected columns: <code>client, invoice_number, amount, due_date</code> (optional: description, issue_date, email). Clients are auto-created if not found.
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center" }}>
+        <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ fontSize: 13 }} />
+        <span style={{ color: "rgba(255,255,255,.4)", fontSize: 12 }}>or paste below</span>
+      </div>
+
+      <textarea
+        value={csvText}
+        onChange={(e) => setCsvText(e.target.value)}
+        placeholder={`client,invoice_number,amount,due_date\nAcme Corp,INV-001,1500.00,2026-03-01\nWidgetCo,INV-002,750.00,2026-02-15`}
+        style={{ ...inputStyle, minHeight: 100, fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}
+      />
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <button onClick={handleParse} style={{ ...smallBtn, background: "rgba(255,255,255,.10)", color: "rgba(255,255,255,.92)" }}>
+          Preview
+        </button>
+        {preview.length > 0 && (
+          <button onClick={doImport} disabled={importing} style={{ ...smallBtn, background: "rgba(48,209,88,.20)", color: "#30d158" }}>
+            {importing ? "Importing..." : `Import ${preview.length} invoices`}
+          </button>
+        )}
+        {result && <span style={{ fontSize: 13, color: "#30d158" }}>{result}</span>}
+      </div>
+
+      {preview.length > 0 && (
+        <div style={{ marginTop: 12, border: "1px solid rgba(255,255,255,.10)", borderRadius: 12, overflow: "hidden", maxHeight: 200, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "rgba(255,255,255,.04)" }}>
+                {Object.keys(preview[0]).map(k => <th key={k} style={{ ...thStyle, fontSize: 11 }}>{k}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {preview.slice(0, 10).map((row, i) => (
+                <tr key={i} style={{ borderTop: "1px solid rgba(255,255,255,.06)" }}>
+                  {Object.values(row).map((v, j) => <td key={j} style={{ ...tdStyle, fontSize: 12 }}>{v}</td>)}
+                </tr>
+              ))}
+              {preview.length > 10 && (
+                <tr><td colSpan={Object.keys(preview[0]).length} style={{ padding: 8, textAlign: "center", color: "rgba(255,255,255,.4)", fontSize: 11 }}>
+                  ...and {preview.length - 10} more rows
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

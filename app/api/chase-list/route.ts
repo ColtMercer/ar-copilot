@@ -44,6 +44,13 @@ export async function GET() {
       c.primary_contact_name,
       c.primary_contact_email,
       cs.tone AS client_tone,
+      cs.payment_link AS payment_link,
+      cs.signature_name AS signature_name,
+      cs.signature_company AS signature_company,
+      cs.signature_phone AS signature_phone,
+      cs.signature_email AS signature_email,
+      cs.include_late_fee AS include_late_fee,
+      cs.late_fee_text AS late_fee_text,
       (CURRENT_DATE - i.due_date) AS days_overdue,
       CASE
         WHEN i.last_followup_at IS NULL THEN 9999
@@ -78,6 +85,13 @@ export async function GET() {
         last_followup_stage: inv.last_followup_stage,
         recommended_stage: recommendedStage,
         client_tone: inv.client_tone || "friendly",
+        payment_link: inv.payment_link || null,
+        signature_name: inv.signature_name || null,
+        signature_company: inv.signature_company || null,
+        signature_phone: inv.signature_phone || null,
+        signature_email: inv.signature_email || null,
+        include_late_fee: inv.include_late_fee ?? false,
+        late_fee_text: inv.late_fee_text || null,
       };
     })
     .filter(Boolean)
