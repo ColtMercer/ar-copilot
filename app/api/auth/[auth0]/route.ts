@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { auth0 } from "@/lib/auth0";
 
 export const runtime = "nodejs";
