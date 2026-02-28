@@ -1,17 +1,24 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const db = await getDb();
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const client_id = url.searchParams.get("client_id");
 
-  const where: string[] = [];
-  const params: any[] = [];
-  let i = 1;
+  const where: string[] = ["user_id = $1"];
+  const params: any[] = [userId];
+  let i = 2;
 
   if (status) { where.push(`status = $${i++}`); params.push(status); }
   if (client_id) { where.push(`client_id = $${i++}`); params.push(client_id); }
@@ -31,6 +38,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const body = (await req.json()) as {
     client_id?: string;
     invoice_number?: string;
@@ -47,11 +60,21 @@ export async function POST(req: Request) {
   }
 
   const db = await getDb();
+  if (body.client_id) {
+    const ownsClient = await db.query(`SELECT 1 FROM clients WHERE id = $1 AND user_id = $2`, [
+      body.client_id,
+      userId,
+    ]);
+    if (ownsClient.rowCount === 0) {
+      return NextResponse.json({ ok: false, error: "invalid client_id" }, { status: 400 });
+    }
+  }
   const { rows } = await db.query(
-    `INSERT INTO invoices (client_id, invoice_number, description, currency, amount_cents, issue_date, due_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO invoices (user_id, client_id, invoice_number, description, currency, amount_cents, issue_date, due_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
     [
+      userId,
       body.client_id || null,
       body.invoice_number || null,
       body.description || null,
@@ -66,6 +89,12 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const body = (await req.json()) as {
     id?: string;
     status?: string;
@@ -95,10 +124,11 @@ export async function PATCH(req: Request) {
 
   sets.push(`updated_at = now()`);
   params.push(body.id);
+  params.push(userId);
 
   const db = await getDb();
   const { rows } = await db.query(
-    `UPDATE invoices SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+    `UPDATE invoices SET ${sets.join(", ")} WHERE id = $${i} AND user_id = $${i + 1} RETURNING *`,
     params
   );
 

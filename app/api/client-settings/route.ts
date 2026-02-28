@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,12 @@ function defaults(client_id: string): ClientSettings {
 }
 
 export async function GET(req: Request) {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const url = new URL(req.url);
   const client_id = url.searchParams.get("client_id");
 
@@ -50,13 +57,20 @@ export async function GET(req: Request) {
   }
 
   const db = await getDb();
+  const ownsClient = await db.query(`SELECT 1 FROM clients WHERE id = $1 AND user_id = $2`, [
+    client_id,
+    userId,
+  ]);
+  if (ownsClient.rowCount === 0) {
+    return NextResponse.json({ ok: false, error: "invalid client_id" }, { status: 400 });
+  }
   const { rows } = await db.query(
     `SELECT client_id, tone, include_payment_methods, include_late_fee, late_fee_text,
             payment_link, signature_name, signature_company, signature_phone, signature_email,
             updated_at
      FROM client_settings
-     WHERE client_id = $1`,
-    [client_id]
+     WHERE client_id = $1 AND user_id = $2`,
+    [client_id, userId]
   );
 
   const settings = (rows?.[0] as ClientSettings | undefined) || defaults(client_id);
@@ -64,6 +78,12 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const body = (await req.json()) as Partial<ClientSettings> & { client_id?: string; tone?: string };
 
   const client_id = (body.client_id || "").trim();
@@ -77,14 +97,21 @@ export async function PUT(req: Request) {
   }
 
   const db = await getDb();
+  const ownsClient = await db.query(`SELECT 1 FROM clients WHERE id = $1 AND user_id = $2`, [
+    client_id,
+    userId,
+  ]);
+  if (ownsClient.rowCount === 0) {
+    return NextResponse.json({ ok: false, error: "invalid client_id" }, { status: 400 });
+  }
 
   const existing = await db.query(
     `SELECT client_id, tone, include_payment_methods, include_late_fee, late_fee_text,
             payment_link, signature_name, signature_company, signature_phone, signature_email,
             updated_at
      FROM client_settings
-     WHERE client_id = $1`,
-    [client_id]
+     WHERE client_id = $1 AND user_id = $2`,
+    [client_id, userId]
   );
 
   const merged: ClientSettings = {
@@ -116,11 +143,12 @@ export async function PUT(req: Request) {
 
   const { rows } = await db.query(
     `INSERT INTO client_settings (
-        client_id, tone, include_payment_methods, include_late_fee, late_fee_text,
+        client_id, user_id, tone, include_payment_methods, include_late_fee, late_fee_text,
         payment_link, signature_name, signature_company, signature_phone, signature_email,
         updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
       ON CONFLICT (client_id) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
         tone = EXCLUDED.tone,
         include_payment_methods = EXCLUDED.include_payment_methods,
         include_late_fee = EXCLUDED.include_late_fee,
@@ -134,6 +162,7 @@ export async function PUT(req: Request) {
       RETURNING *`,
     [
       merged.client_id,
+      userId,
       merged.tone,
       merged.include_payment_methods,
       merged.include_late_fee,

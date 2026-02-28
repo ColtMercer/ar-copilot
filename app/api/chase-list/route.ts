@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,12 @@ function severity(stage: Stage): number {
 }
 
 export async function GET() {
+  const session = await getSession();
+  const userId = session?.user?.sub;
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const db = await getDb();
 
   const { rows } = await db.query(`
@@ -57,10 +64,10 @@ export async function GET() {
         ELSE (CURRENT_DATE - i.last_followup_at::date)
       END AS days_since_followup
     FROM invoices i
-    LEFT JOIN clients c ON c.id = i.client_id
-    LEFT JOIN client_settings cs ON cs.client_id = c.id
-    WHERE i.status = 'open'
-  `);
+    LEFT JOIN clients c ON c.id = i.client_id AND c.user_id = $1
+    LEFT JOIN client_settings cs ON cs.client_id = c.id AND cs.user_id = $1
+    WHERE i.status = 'open' AND i.user_id = $1
+  `, [userId]);
 
   const chaseList = rows
     .map((inv: any) => {

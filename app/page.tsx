@@ -1,9 +1,13 @@
+import { getSession } from "@/lib/auth";
+
 type PageProps = {
   searchParams?: { [key: string]: string | string[] | undefined };
 };
 
-export default function Home({ searchParams }: PageProps) {
+export default async function Home({ searchParams }: PageProps) {
   const waitlistSuccess = searchParams?.waitlist === "1";
+  const session = await getSession();
+  const isAuthed = Boolean(session?.user?.sub);
 
   return (
     <>
@@ -316,6 +320,15 @@ export default function Home({ searchParams }: PageProps) {
             <a className="btn" href="#pricing">
               Pricing
             </a>
+            {isAuthed ? (
+              <a className="btn" href="/dashboard">
+                Dashboard
+              </a>
+            ) : (
+              <a className="btn" href="/api/auth/login">
+                Sign In
+              </a>
+            )}
             <a className="btn primary" href="#waitlist">
               Join waitlist
             </a>

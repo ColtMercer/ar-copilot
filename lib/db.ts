@@ -61,6 +61,7 @@ async function initSchema() {
 
     CREATE TABLE IF NOT EXISTS clients (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id TEXT,
       name TEXT NOT NULL,
       primary_contact_name TEXT,
       primary_contact_email TEXT,
@@ -70,8 +71,12 @@ async function initSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE clients ADD COLUMN IF NOT EXISTS user_id TEXT;
+    CREATE INDEX IF NOT EXISTS clients_user_id_idx ON clients(user_id);
+
     CREATE TABLE IF NOT EXISTS client_settings (
       client_id UUID PRIMARY KEY REFERENCES clients(id) ON DELETE CASCADE,
+      user_id TEXT,
       tone TEXT NOT NULL DEFAULT 'friendly' CHECK (tone IN ('friendly','neutral','firm')),
       include_payment_methods BOOLEAN NOT NULL DEFAULT true,
       include_late_fee BOOLEAN NOT NULL DEFAULT false,
@@ -85,9 +90,12 @@ async function initSchema() {
     );
 
     ALTER TABLE client_settings ADD COLUMN IF NOT EXISTS payment_link TEXT;
+    ALTER TABLE client_settings ADD COLUMN IF NOT EXISTS user_id TEXT;
+    CREATE INDEX IF NOT EXISTS client_settings_user_id_idx ON client_settings(user_id);
 
     CREATE TABLE IF NOT EXISTS invoices (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id TEXT,
       client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
       invoice_number TEXT,
       description TEXT,
@@ -103,8 +111,11 @@ async function initSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS user_id TEXT;
+
     CREATE INDEX IF NOT EXISTS invoices_client_id_idx ON invoices(client_id);
     CREATE INDEX IF NOT EXISTS invoices_status_due_idx ON invoices(status, due_date);
+    CREATE INDEX IF NOT EXISTS invoices_user_id_idx ON invoices(user_id);
 
     CREATE TABLE IF NOT EXISTS followup_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -121,6 +132,7 @@ async function initSchema() {
 
     CREATE TABLE IF NOT EXISTS templates (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id TEXT,
       name TEXT NOT NULL,
       tone TEXT NOT NULL DEFAULT 'friendly' CHECK (tone IN ('friendly','neutral','firm')),
       stage TEXT NOT NULL CHECK (stage IN ('pre_due','day_1','day_7','day_14','final')),
@@ -131,7 +143,10 @@ async function initSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id TEXT;
+
     CREATE INDEX IF NOT EXISTS templates_stage_tone_idx ON templates(stage, tone);
+    CREATE INDEX IF NOT EXISTS templates_user_id_idx ON templates(user_id);
   `);
 
   // Seed system templates if empty
