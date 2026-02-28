@@ -9,6 +9,8 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ENV STRIPE_SECRET_KEY=sk_placeholder
+ENV DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/placeholder
 RUN npm run build
 
 FROM base AS runner
