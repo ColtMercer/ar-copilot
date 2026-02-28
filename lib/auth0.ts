@@ -5,7 +5,7 @@ const domain = process.env.AUTH0_DOMAIN || (issuerBaseUrl ? new URL(issuerBaseUr
 const appBaseUrl =
   process.env.APP_BASE_URL ||
   process.env.AUTH0_BASE_URL ||
-  "https://ar-copilot-web-production.up.railway.app";
+  "https://arcopilot.ai";
 
 export const auth0 = new Auth0Client({
   domain,
