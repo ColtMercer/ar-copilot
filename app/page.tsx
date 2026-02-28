@@ -1,13 +1,17 @@
 import { getSession } from "@/lib/auth";
+import PricingButton from "./components/PricingButton";
 
 type PageProps = {
-  searchParams?: { [key: string]: string | string[] | undefined };
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
 export default async function Home({ searchParams }: PageProps) {
-  const waitlistSuccess = searchParams?.waitlist === "1";
+  const resolvedParams = await searchParams;
+  const waitlistSuccess = resolvedParams?.waitlist === "1";
   const session = await getSession();
   const isAuthed = Boolean(session?.user?.sub);
+  const starterPriceId = process.env.STRIPE_PRICE_STARTER || "";
+  const studioPriceId = process.env.STRIPE_PRICE_STUDIO || "";
 
   return (
     <>
@@ -597,6 +601,11 @@ export default async function Home({ searchParams }: PageProps) {
                 <li>Core templates</li>
                 <li>Send log</li>
               </ul>
+              <div style={{ marginTop: 14 }}>
+                <a className="btn" href={isAuthed ? "/dashboard" : "/api/auth/login"}>
+                  Start free
+                </a>
+              </div>
             </div>
             <div
               className="price"
@@ -625,6 +634,9 @@ export default async function Home({ searchParams }: PageProps) {
                 <li>More message variants</li>
                 <li>Client settings (tone / late fee toggle)</li>
               </ul>
+              <div style={{ marginTop: 14 }}>
+                <PricingButton priceId={starterPriceId} label="Start Starter" className="btn primary" />
+              </div>
             </div>
             <div className="price">
               <h3>Studio</h3>
@@ -646,6 +658,9 @@ export default async function Home({ searchParams }: PageProps) {
                 <li>Team notes + shared send log</li>
                 <li>Light analytics (days overdue)</li>
               </ul>
+              <div style={{ marginTop: 14 }}>
+                <PricingButton priceId={studioPriceId} label="Start Studio" className="btn" />
+              </div>
             </div>
           </div>
           <p className="fine" style={{ marginTop: 10 }}>

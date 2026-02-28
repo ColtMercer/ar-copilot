@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { getUserSubscription, invoiceLimitForPlan } from "@/lib/billing";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,19 @@ export async function GET(req: Request) {
   }
 
   const db = await getDb();
+  const subscription = await getUserSubscription(userId);
+  const limit = invoiceLimitForPlan(subscription.plan);
+  const { rows: countRows } = await db.query(
+    `SELECT COUNT(*)::int AS count FROM invoices WHERE user_id = $1 AND status = 'open'`,
+    [userId]
+  );
+  const openCount = countRows?.[0]?.count ?? 0;
+  if (openCount > limit) {
+    return NextResponse.json(
+      { ok: false, error: "invoice_limit_exceeded", plan: subscription.plan, limit, open_invoices: openCount },
+      { status: 402 }
+    );
+  }
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const client_id = url.searchParams.get("client_id");
@@ -60,6 +74,19 @@ export async function POST(req: Request) {
   }
 
   const db = await getDb();
+  const subscription = await getUserSubscription(userId);
+  const limit = invoiceLimitForPlan(subscription.plan);
+  const { rows: countRows } = await db.query(
+    `SELECT COUNT(*)::int AS count FROM invoices WHERE user_id = $1 AND status = 'open'`,
+    [userId]
+  );
+  const openCount = countRows?.[0]?.count ?? 0;
+  if (openCount >= limit) {
+    return NextResponse.json(
+      { ok: false, error: "invoice_limit_exceeded", plan: subscription.plan, limit, open_invoices: openCount },
+      { status: 402 }
+    );
+  }
   if (body.client_id) {
     const ownsClient = await db.query(`SELECT 1 FROM clients WHERE id = $1 AND user_id = $2`, [
       body.client_id,

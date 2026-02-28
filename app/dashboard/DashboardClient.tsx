@@ -2,6 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 
+type DashboardProps = {
+  plan: "free" | "starter" | "studio";
+  planStatus: "active" | "canceled" | "past_due";
+  starterPriceId: string;
+  studioPriceId: string;
+};
+
 type Invoice = {
   id: string;
   client_id: string | null;
@@ -145,15 +152,27 @@ function stageFromDays(days: number): ChaseItem["recommended_stage"] {
   return "final";
 }
 
-export default function DashboardClient() {
+export default function DashboardClient({
+  plan,
+  planStatus,
+  starterPriceId,
+  studioPriceId,
+}: DashboardProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [clients, setClients] = useState<Record<string, Client>>({});
   const [chaseList, setChaseList] = useState<ChaseItem[]>([]);
+  const [billingError, setBillingError] = useState<{
+    error: string;
+    plan?: string;
+    limit?: number;
+    open_invoices?: number;
+  } | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [showAddClient, setShowAddClient] = useState(false);
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
 
   // Invoice detail modal state
   const [activeInvoice, setActiveInvoice] = useState<Invoice | null>(null);
@@ -174,6 +193,13 @@ export default function DashboardClient() {
       fetch("/api/clients").then((r) => r.json()),
       fetch("/api/chase-list").then((r) => r.json()),
     ]);
+    const limitError =
+      invRes?.error === "invoice_limit_exceeded"
+        ? invRes
+        : chaseRes?.error === "invoice_limit_exceeded"
+          ? chaseRes
+          : null;
+    setBillingError(limitError);
     setInvoices(invRes.invoices || []);
     const map: Record<string, Client> = {};
     for (const c of cliRes.clients || []) map[c.id] = c;
@@ -447,6 +473,42 @@ export default function DashboardClient() {
     }
   }, [activeInvoice, draftBody, draftStage, draftSubject, load]);
 
+  const startCheckout = useCallback(async (priceId: string) => {
+    if (!priceId || billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ priceId }),
+      });
+      if (res.status === 401) {
+        window.location.href = "/api/auth/login";
+        return;
+      }
+      const data = await res.json();
+      if (data?.url) window.location.href = data.url;
+    } finally {
+      setBillingBusy(false);
+    }
+  }, [billingBusy]);
+
+  const openPortal = useCallback(async () => {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const res = await fetch("/api/stripe/portal", { method: "POST" });
+      if (res.status === 401) {
+        window.location.href = "/api/auth/login";
+        return;
+      }
+      const data = await res.json();
+      if (data?.url) window.location.href = data.url;
+    } finally {
+      setBillingBusy(false);
+    }
+  }, [billingBusy]);
+
   return (
     <div
       style={{
@@ -460,12 +522,36 @@ export default function DashboardClient() {
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 28 }}>AR Copilot Dashboard</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <h1 style={{ margin: 0, fontSize: 28 }}>AR Copilot Dashboard</h1>
+              <span
+                style={{
+                  fontSize: 12,
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,.2)",
+                  background: plan === "free" ? "rgba(255,255,255,.08)" : "rgba(124,92,255,.20)",
+                  color: "rgba(255,255,255,.9)",
+                  textTransform: "capitalize",
+                }}
+              >
+                {plan} {plan !== "free" ? `(${planStatus})` : ""}
+              </span>
+            </div>
             <p style={{ margin: "4px 0 0", color: "rgba(255,255,255,.6)", fontSize: 14 }}>
               Today&apos;s chase list & invoice tracker
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {plan === "free" ? (
+              <button onClick={() => startCheckout(starterPriceId)} style={btnStyle} disabled={billingBusy}>
+                {billingBusy ? "Redirecting..." : "Upgrade"}
+              </button>
+            ) : (
+              <button onClick={openPortal} style={btnStyle} disabled={billingBusy}>
+                {billingBusy ? "Redirecting..." : "Manage subscription"}
+              </button>
+            )}
             <button onClick={() => { setShowAdd(!showAdd); setShowAddClient(false); setShowCsvImport(false); }} style={btnStyle}>
               {showAdd ? "Cancel" : "+ Invoice"}
             </button>
@@ -485,6 +571,22 @@ export default function DashboardClient() {
         </div>
 
         {/* KPIs */}
+        {billingError ? (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,69,58,.4)",
+              background: "rgba(255,69,58,.12)",
+              color: "rgba(255,255,255,.9)",
+              fontSize: 13,
+            }}
+          >
+            Invoice limit exceeded for the {(billingError.plan || "free")} plan ({billingError.open_invoices} open).
+            Upgrade to add more.
+          </div>
+        ) : null}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
           <KPI label="Open" value={fmt$(openTotal)} sub={`${open.length} invoices`} />
           <KPI label="Overdue" value={fmt$(overdueTotal)} sub={`${overdue.length} invoices`} color="#ff453a" />

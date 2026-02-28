@@ -147,6 +147,19 @@ async function initSchema() {
 
     CREATE INDEX IF NOT EXISTS templates_stage_tone_idx ON templates(stage, tone);
     CREATE INDEX IF NOT EXISTS templates_user_id_idx ON templates(user_id);
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id TEXT PRIMARY KEY,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free','starter','studio')),
+      plan_status TEXT NOT NULL DEFAULT 'active' CHECK (plan_status IN ('active','canceled','past_due')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS subscriptions_stripe_customer_id_idx ON subscriptions(stripe_customer_id);
+    CREATE INDEX IF NOT EXISTS subscriptions_stripe_subscription_id_idx ON subscriptions(stripe_subscription_id);
   `);
 
   // Seed system templates if empty

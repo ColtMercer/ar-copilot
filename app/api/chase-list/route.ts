@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { getUserSubscription, invoiceLimitForPlan } from "@/lib/billing";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,19 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const subscription = await getUserSubscription(userId);
+  const limit = invoiceLimitForPlan(subscription.plan);
+  const { rows: countRows } = await db.query(
+    `SELECT COUNT(*)::int AS count FROM invoices WHERE user_id = $1 AND status = 'open'`,
+    [userId]
+  );
+  const openCount = countRows?.[0]?.count ?? 0;
+  if (openCount > limit) {
+    return NextResponse.json(
+      { ok: false, error: "invoice_limit_exceeded", plan: subscription.plan, limit, open_invoices: openCount },
+      { status: 402 }
+    );
+  }
 
   const { rows } = await db.query(`
     SELECT
