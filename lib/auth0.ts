@@ -1,7 +1,15 @@
 import { Auth0Client } from "@auth0/nextjs-auth0/server";
 
 const issuerBaseUrl = process.env.AUTH0_ISSUER_BASE_URL;
-const domain = process.env.AUTH0_DOMAIN || (issuerBaseUrl ? new URL(issuerBaseUrl).host : undefined);
+function extractDomain(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url.startsWith("http") ? url : `https://${url}`).host;
+  } catch {
+    return url;
+  }
+}
+const domain = process.env.AUTH0_DOMAIN || extractDomain(issuerBaseUrl);
 const appBaseUrl =
   process.env.APP_BASE_URL ||
   process.env.AUTH0_BASE_URL ||
