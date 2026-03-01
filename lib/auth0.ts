@@ -21,6 +21,16 @@ export const auth0 = new Auth0Client({
   clientSecret: process.env.AUTH0_CLIENT_SECRET,
   secret: process.env.AUTH0_SECRET,
   appBaseUrl,
+  authorizationParameters: {
+    scope: "openid profile email",
+  },
+  // Railway reverse proxy terminates SSL and forwards HTTP internally.
+  // Without secure:false, the transaction cookie never gets set/read
+  // during the OAuth callback flow, causing login to silently fail.
+  transactionCookie: {
+    sameSite: "lax" as const,
+    secure: false,
+  },
   routes: {
     login: "/api/auth/login",
     logout: "/api/auth/logout",
