@@ -288,6 +288,48 @@ export default function DashboardClient({
     [activeClientSettings, clients]
   );
 
+  const sendChaseEmail = useCallback(
+    async (item: ChaseItem) => {
+      if (!item.contact_email) {
+        alert(`No contact email for ${item.client_name || "this client"}. Add one in the client settings.`);
+        return;
+      }
+      setBusyId(item.invoice_id + ":email");
+      try {
+        const template = await getTemplate(item.recommended_stage, item.client_tone || "friendly");
+        if (!template) {
+          alert(`No template found for stage=${item.recommended_stage} tone=${item.client_tone}`);
+          return;
+        }
+        const vars = varsForChaseItem(item);
+        const subject = renderTemplate(template.subject, vars);
+        const body = renderTemplate(template.body, vars);
+
+        const res = await fetch("/api/send-email", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            invoice_id: item.invoice_id,
+            to_email: item.contact_email,
+            subject,
+            body,
+            stage: item.recommended_stage,
+          }),
+        }).then(r => r.json());
+
+        if (res.ok) {
+          alert(res.sent ? `✅ Email sent to ${item.contact_email}` : "✅ Logged (no email API key configured)");
+          await load();
+        } else {
+          alert(`❌ ${res.error || "Failed to send email"}`);
+        }
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [getTemplate, varsForChaseItem, load]
+  );
+
   const copyEmail = useCallback(
     async (item: ChaseItem) => {
       setBusyId(item.invoice_id + ":copy");
@@ -710,7 +752,21 @@ export default function DashboardClient({
                     <div style={{ fontWeight: 700 }}>{fmt$(item.amount_cents, item.currency)}</div>
                   </div>
 
-                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    {item.contact_email && (
+                      <button
+                        onClick={() => sendChaseEmail(item)}
+                        disabled={!!busyId}
+                        style={{
+                          ...smallBtn,
+                          background: "rgba(99,102,241,.85)",
+                          color: "#fff",
+                          opacity: busyId ? 0.7 : 1,
+                        }}
+                      >
+                        {busyId === item.invoice_id + ":email" ? "Sending…" : "📤 Send"}
+                      </button>
+                    )}
                     <button
                       onClick={() => copyEmail(item)}
                       disabled={busyId === item.invoice_id + ":copy" || busyId === item.invoice_id + ":sent"}
