@@ -6,7 +6,8 @@ import { Resend } from "resend";
 
 export async function POST(req: Request) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userId = session?.user?.sub;
+  if (!session || !userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json();
   const { invoice_id, to_email, subject, body: emailBody, stage } = body;
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
   // Verify invoice belongs to this user
   const invResult = await db.query(
     "SELECT id, invoice_number FROM invoices WHERE id=$1 AND user_id=$2",
-    [invoice_id, session.id]
+    [invoice_id, userId]
   );
   if (invResult.rowCount === 0) {
     return NextResponse.json({ error: "Invoice not found" }, { status: 404 });

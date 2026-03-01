@@ -866,10 +866,50 @@ export default function DashboardClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {filtered.length === 0 && invoices.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ padding: "0" }}>
+                    <div style={{
+                      padding: "48px 32px", textAlign: "center",
+                      background: "rgba(99,102,241,.04)", borderRadius: 12,
+                      border: "1px dashed rgba(99,102,241,.25)", margin: 16,
+                    }}>
+                      <div style={{ fontSize: 36, marginBottom: 12 }}>🚀</div>
+                      <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8, color: "rgba(255,255,255,.9)" }}>
+                        Welcome to AR Copilot
+                      </div>
+                      <p style={{ color: "rgba(255,255,255,.55)", fontSize: 14, maxWidth: 420, margin: "0 auto 24px", lineHeight: 1.6 }}>
+                        Stop chasing payments manually. AR Copilot tracks your invoices and sends follow-up emails automatically.
+                      </p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 520, margin: "0 auto 28px", textAlign: "left" }}>
+                        {[
+                          { n: "1", title: "Add a client", desc: "Enter their name and email address." },
+                          { n: "2", title: "Add an invoice", desc: "Set the amount, due date, and invoice number." },
+                          { n: "3", title: "Send follow-ups", desc: "AR Copilot tells you who to chase and writes the email." },
+                        ].map(s => (
+                          <div key={s.n} style={{
+                            background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)",
+                            borderRadius: 12, padding: "14px 16px",
+                          }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "#818cf8", marginBottom: 6, letterSpacing: ".08em" }}>
+                              STEP {s.n}
+                            </div>
+                            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{s.title}</div>
+                            <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", lineHeight: 1.5 }}>{s.desc}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,.4)" }}>
+                        Click <strong style={{ color: "rgba(255,255,255,.7)" }}>＋ Add Client</strong> or <strong style={{ color: "rgba(255,255,255,.7)" }}>＋ Add Invoice</strong> above to get started.
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {filtered.length === 0 && invoices.length > 0 && (
                 <tr>
                   <td colSpan={7} style={{ padding: 32, textAlign: "center", color: "rgba(255,255,255,.4)" }}>
-                    No invoices yet. Add one to get started.
+                    No invoices match the current filter.
                   </td>
                 </tr>
               )}
