@@ -182,6 +182,9 @@ export default function DashboardClient({
   const [draftTone, setDraftTone] = useState<string>("friendly");
   const [draftSubject, setDraftSubject] = useState<string>("");
   const [draftBody, setDraftBody] = useState<string>("");
+  const [toEmail, setToEmail] = useState<string>("");
+  const [sendEmailBusy, setSendEmailBusy] = useState(false);
+  const [sendEmailResult, setSendEmailResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const [activeClientSettings, setActiveClientSettings] = useState<ClientSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -341,6 +344,7 @@ export default function DashboardClient({
       setActiveInvoice(inv);
       setActiveClientSettings(null);
       setSettingsSavedAt(null);
+      setSendEmailResult(null);
 
       const days = daysOverdue(inv.due_date);
       setDraftStage(stageFromDays(days));
@@ -348,6 +352,13 @@ export default function DashboardClient({
       setDraftSubject("");
       setDraftBody("");
       setActiveFollowups([]);
+
+      // Pre-fill toEmail with client contact email
+      if (inv.client_id && clients[inv.client_id]?.primary_contact_email) {
+        setToEmail(clients[inv.client_id].primary_contact_email || "");
+      } else {
+        setToEmail("");
+      }
 
       // Load followup timeline
       try {
@@ -472,6 +483,38 @@ export default function DashboardClient({
       setDetailBusy(false);
     }
   }, [activeInvoice, draftBody, draftStage, draftSubject, load]);
+
+  const sendEmail = useCallback(async () => {
+    if (!activeInvoice || !toEmail || !draftSubject || !draftBody) return;
+
+    setSendEmailBusy(true);
+    setSendEmailResult(null);
+    try {
+      const res = await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          invoice_id: activeInvoice.id,
+          to_email: toEmail,
+          subject: draftSubject,
+          body: draftBody,
+          stage: draftStage,
+        }),
+      }).then((r) => r.json());
+
+      if (res.ok) {
+        setSendEmailResult({ ok: true, msg: res.sent ? `✅ Sent to ${toEmail}` : "✅ Logged (no API key configured)" });
+        // Refresh followup timeline
+        const fRes = await fetch(`/api/followups?invoice_id=${encodeURIComponent(activeInvoice.id)}`).then((r) => r.json());
+        setActiveFollowups(fRes.followups || []);
+        await load();
+      } else {
+        setSendEmailResult({ ok: false, msg: `❌ ${res.error || "Failed to send"}` });
+      }
+    } finally {
+      setSendEmailBusy(false);
+    }
+  }, [activeInvoice, toEmail, draftSubject, draftBody, draftStage, load]);
 
   const startCheckout = useCallback(async (priceId: string) => {
     if (!priceId || billingBusy) return;
@@ -873,6 +916,11 @@ export default function DashboardClient({
           onLoadTemplate={loadDraftFromTemplate}
           onCopy={copyDraft}
           onMarkSent={markDraftSent}
+          toEmail={toEmail}
+          onChangeToEmail={setToEmail}
+          onSendEmail={sendEmail}
+          sendEmailBusy={sendEmailBusy}
+          sendEmailResult={sendEmailResult}
         />
       )}
     </div>
@@ -1014,6 +1062,11 @@ function InvoiceDetailModal(props: {
   onLoadTemplate: () => Promise<void>;
   onCopy: () => Promise<void>;
   onMarkSent: () => Promise<void>;
+  toEmail: string;
+  onChangeToEmail: (v: string) => void;
+  onSendEmail: () => Promise<void>;
+  sendEmailBusy: boolean;
+  sendEmailResult: { ok: boolean; msg: string } | null;
 }) {
   const inv = props.invoice;
   const client = props.client;
@@ -1162,6 +1215,43 @@ function InvoiceDetailModal(props: {
               </div>
             )}
 
+            </div>
+
+            {/* Send Email row */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={labelStyle}>To (recipient email)</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={props.toEmail}
+                  onChange={(e) => props.onChangeToEmail(e.target.value)}
+                  placeholder="client@example.com"
+                  type="email"
+                  style={{ ...inputStyle, flex: 1 }}
+                  disabled={props.busy || props.sendEmailBusy}
+                />
+                <button
+                  onClick={props.onSendEmail}
+                  disabled={props.busy || props.sendEmailBusy || !props.toEmail || !props.draftSubject || !props.draftBody}
+                  style={{
+                    ...smallBtn,
+                    background: "rgba(99,102,241,.85)",
+                    color: "#fff",
+                    padding: "8px 16px",
+                    whiteSpace: "nowrap",
+                    opacity: (!props.toEmail || !props.draftSubject || !props.draftBody) ? 0.5 : 1,
+                  }}
+                >
+                  {props.sendEmailBusy ? "Sending…" : "📤 Send email"}
+                </button>
+              </div>
+              {props.sendEmailResult && (
+                <div style={{
+                  marginTop: 6, fontSize: 12, fontWeight: 600,
+                  color: props.sendEmailResult.ok ? "#34d399" : "#f87171",
+                }}>
+                  {props.sendEmailResult.msg}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
