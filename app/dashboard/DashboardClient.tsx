@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 type DashboardProps = {
   plan: "free" | "starter" | "studio";
   planStatus: "active" | "canceled" | "past_due";
+  currentPeriodEnd: string | null;
   starterPriceId: string;
   studioPriceId: string;
 };
@@ -155,6 +156,7 @@ function stageFromDays(days: number): ChaseItem["recommended_stage"] {
 export default function DashboardClient({
   plan,
   planStatus,
+  currentPeriodEnd,
   starterPriceId,
   studioPriceId,
 }: DashboardProps) {
@@ -224,6 +226,20 @@ export default function DashboardClient({
 
   const openTotal = open.reduce((s, i) => s + i.amount_cents, 0);
   const overdueTotal = overdue.reduce((s, i) => s + i.amount_cents, 0);
+  const daysUntilRenewal = currentPeriodEnd
+    ? Math.ceil((new Date(currentPeriodEnd).getTime() - Date.now()) / 86400000)
+    : null;
+  const showRenewalBanner =
+    !!currentPeriodEnd &&
+    plan !== "free" &&
+    daysUntilRenewal !== null &&
+    daysUntilRenewal <= 7 &&
+    daysUntilRenewal > 0;
+  const renewalDays = daysUntilRenewal ?? 0;
+  const renewalLabel = currentPeriodEnd
+    ? new Date(currentPeriodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+  const showFreeUpgradeCta = plan === "free" && open.length > 2;
 
   const filtered =
     filter === "all"
@@ -610,6 +626,9 @@ export default function DashboardClient({
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0, fontSize: 28 }}>AR Copilot Dashboard</h1>
               <span
+                onClick={() =>
+                  plan === "free" ? startCheckout(starterPriceId) : openPortal()
+                }
                 style={{
                   fontSize: 12,
                   padding: "4px 10px",
@@ -618,6 +637,7 @@ export default function DashboardClient({
                   background: plan === "free" ? "rgba(255,255,255,.08)" : "rgba(124,92,255,.20)",
                   color: "rgba(255,255,255,.9)",
                   textTransform: "capitalize",
+                  cursor: "pointer",
                 }}
               >
                 {plan} {plan !== "free" ? `(${planStatus})` : ""}
@@ -672,6 +692,39 @@ export default function DashboardClient({
             Upgrade to add more.
           </div>
         ) : null}
+        {showRenewalBanner ? (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,204,0,.45)",
+              background: "rgba(255,204,0,.14)",
+              color: "rgba(255,255,255,.92)",
+              fontSize: 13,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>
+              Renewal in {renewalDays} day{renewalDays === 1 ? "" : "s"} — next charge{" "}
+              {renewalLabel || "soon"}.
+            </span>
+            <button
+              onClick={openPortal}
+              style={{
+                ...smallBtn,
+                background: "rgba(255,255,255,.18)",
+                color: "rgba(255,255,255,.95)",
+              }}
+            >
+              Manage billing
+            </button>
+          </div>
+        ) : null}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
           <KPI label="Open" value={fmt$(openTotal)} sub={`${open.length} invoices`} />
           <KPI label="Overdue" value={fmt$(overdueTotal)} sub={`${overdue.length} invoices`} color="#ff453a" />
@@ -700,16 +753,30 @@ export default function DashboardClient({
                 Copy the suggested email, then click “Mark sent” to keep your cadence.
               </div>
             </div>
-            <button
-              onClick={() => load()}
-              style={{
-                ...smallBtn,
-                background: "rgba(255,255,255,.10)",
-                color: "rgba(255,255,255,.9)",
-              }}
-            >
-              Refresh
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {showFreeUpgradeCta ? (
+                <button
+                  onClick={() => startCheckout(starterPriceId)}
+                  style={{
+                    ...smallBtn,
+                    background: "rgba(124,92,255,.30)",
+                    color: "rgba(255,255,255,.95)",
+                  }}
+                >
+                  Upgrade for more slots
+                </button>
+              ) : null}
+              <button
+                onClick={() => load()}
+                style={{
+                  ...smallBtn,
+                  background: "rgba(255,255,255,.10)",
+                  color: "rgba(255,255,255,.9)",
+                }}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           {chaseList.length === 0 ? (

@@ -35,7 +35,7 @@ export function normalizePlanStatus(status: string | null | undefined): PlanStat
 export async function getUserSubscription(userId: string) {
   const db = await getDb();
   const { rows } = await db.query(
-    `SELECT user_id, stripe_customer_id, stripe_subscription_id, plan, plan_status
+    `SELECT user_id, stripe_customer_id, stripe_subscription_id, plan, plan_status, current_period_end
      FROM subscriptions
      WHERE user_id = $1`,
     [userId]
@@ -46,6 +46,7 @@ export async function getUserSubscription(userId: string) {
       user_id: userId,
       stripe_customer_id: null,
       stripe_subscription_id: null,
+      current_period_end: null,
       plan: "free",
       plan_status: "active",
     }
@@ -53,6 +54,7 @@ export async function getUserSubscription(userId: string) {
     user_id: string;
     stripe_customer_id: string | null;
     stripe_subscription_id: string | null;
+    current_period_end: string | null;
     plan: Plan;
     plan_status: PlanStatus;
   };

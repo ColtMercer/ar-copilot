@@ -38,19 +38,23 @@ async function upsertSubscriptionByUserId(
     stripeSubscriptionId?: string | null;
     plan?: string | null;
     planStatus?: string | null;
+    currentPeriodEnd?: string | null;
   }
 ) {
   const insertPlan = data.plan ?? "free";
   const insertStatus = data.planStatus ?? "active";
+  const currentPeriodEnd = data.currentPeriodEnd ?? null;
+  const hasCurrentPeriodEnd = Object.prototype.hasOwnProperty.call(data, "currentPeriodEnd");
 
   await db.query(
-    `INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, plan, plan_status)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, plan, plan_status, current_period_end)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (user_id) DO UPDATE SET
        stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, subscriptions.stripe_customer_id),
        stripe_subscription_id = COALESCE(EXCLUDED.stripe_subscription_id, subscriptions.stripe_subscription_id),
-       plan = COALESCE($6, subscriptions.plan),
-       plan_status = COALESCE($7, subscriptions.plan_status),
+       plan = COALESCE($7, subscriptions.plan),
+       plan_status = COALESCE($8, subscriptions.plan_status),
+       current_period_end = CASE WHEN $9 THEN $6 ELSE subscriptions.current_period_end END,
        updated_at = now()`,
     [
       userId,
@@ -58,8 +62,10 @@ async function upsertSubscriptionByUserId(
       data.stripeSubscriptionId ?? null,
       insertPlan,
       insertStatus,
+      currentPeriodEnd,
       data.plan ?? null,
       data.planStatus ?? null,
+      hasCurrentPeriodEnd,
     ]
   );
 }
@@ -101,12 +107,18 @@ export async function POST(req: Request) {
       const priceId = subscription.items.data[0]?.price?.id;
       const plan = planFromPriceId(priceId);
       const planStatus = normalizePlanStatus(subscription.status);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rawPeriodEnd = (subscription as any).current_period_end as number | null | undefined;
+      const currentPeriodEnd = rawPeriodEnd
+        ? new Date(rawPeriodEnd * 1000).toISOString()
+        : null;
 
       await upsertSubscriptionByUserId(db, userId, {
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscriptionId,
         plan,
         planStatus,
+        currentPeriodEnd,
       });
       break;
     }
@@ -123,12 +135,18 @@ export async function POST(req: Request) {
       const priceId = subscription.items.data[0]?.price?.id;
       const plan = planFromPriceId(priceId);
       const planStatus = normalizePlanStatus(subscription.status);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rawPeriodEnd2 = (subscription as any).current_period_end as number | null | undefined;
+      const currentPeriodEnd = rawPeriodEnd2
+        ? new Date(rawPeriodEnd2 * 1000).toISOString()
+        : null;
 
       await upsertSubscriptionByUserId(db, userId, {
         stripeCustomerId: customerId,
         stripeSubscriptionId: subscription.id,
         plan,
         planStatus,
+        currentPeriodEnd,
       });
       break;
     }
@@ -147,6 +165,7 @@ export async function POST(req: Request) {
         stripeSubscriptionId: null,
         plan: "free",
         planStatus: "canceled",
+        currentPeriodEnd: null,
       });
       break;
     }
